@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -26,22 +26,54 @@ jobs:
           gradle-version: '8.7'
 
       - name: Find Android project
+        id: find_project
+        shell: bash
         run: |
           echo "Searching for Android project..."
-          find . -name "build.gradle" -o -name "build.gradle.kts"
+
+          PROJECT_DIR=$(find . -type f -name "settings.gradle*" -print -quit | xargs -r dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle or settings.gradle.kts not found!"
+            find . -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR="${PROJECT_DIR#./}"
+
+          echo "Android project found at: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Build Debug APK
+        shell: bash
         run: |
-          cd android-project
-          gradle assembleDebug --no-daemon --stacktrace
+          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
+
+          echo "Building from: $PROJECT_DIR"
+
+          cd "$PROJECT_DIR"
+
+          chmod +x gradlew
+
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Find APK
+        id: find_apk
+        shell: bash
         run: |
-          find android-project -type f -name "*.apk" -print
+          APK_FILE=$(find . -type f -name "*.apk" | head -1)
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK file not found!"
+            exit 1
+          fi
+
+          echo "APK found: $APK_FILE"
+          echo "apk_path=$APK_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MonthlyWeeklyResultApp-debug
-          path: android-project/**/build/outputs/apk/debug/*.apk
+          path: ${{ steps.find_project.outputs.project_dir }}/**/*.apk
           if-no-files-found: error
