@@ -25,55 +25,56 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Find Android project
-        id: find_project
-        shell: bash
+      - name: Find ZIP file
+        id: find_zip
         run: |
-          echo "Searching for Android project..."
+          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -1)
 
-          PROJECT_DIR=$(find . -type f -name "settings.gradle*" -print -quit | xargs -r dirname)
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: settings.gradle or settings.gradle.kts not found!"
-            find . -maxdepth 4 -type f | head -100
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found!"
             exit 1
           fi
 
-          PROJECT_DIR="${PROJECT_DIR#./}"
+          echo "ZIP found: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-          echo "Android project found at: $PROJECT_DIR"
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+      - name: Extract project
+        run: |
+          rm -rf android-project
+          mkdir android-project
+
+          unzip -q "${{ steps.find_zip.outputs.zip_file }}" -d android-project
+
+          echo "Project files:"
+          find android-project -maxdepth 3 -type f
 
       - name: Build Debug APK
-        shell: bash
         run: |
-          PROJECT_DIR="${{ steps.find_project.outputs.project_dir }}"
+          cd android-project
 
-          echo "Building from: $PROJECT_DIR"
+          chmod +x gradlew 2>/dev/null || true
 
-          cd "$PROJECT_DIR"
-
-          chmod +x gradlew
-
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Find APK
-        id: find_apk
-        shell: bash
         run: |
-          APK_FILE=$(find . -type f -name "*.apk" | head -1)
+          APK_FILE=$(find android-project -type f -name "*.apk" | head -1)
 
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: APK file not found!"
             exit 1
           fi
 
-          echo "APK found: $APK_FILE"
-          echo "apk_path=$APK_FILE" >> "$GITHUB_OUTPUT"
+          echo "APK found:"
+          echo "$APK_FILE"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MonthlyWeeklyResultApp-debug
-          path: ${{ steps.find_project.outputs.project_dir }}/**/*.apk
+          path: android-project/**/*.apk
           if-no-files-found: error
